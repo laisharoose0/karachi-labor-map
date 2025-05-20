@@ -1,60 +1,168 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Karachi Labor Zones Map</title>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Karachi Labor Inspectors Map</title>
 
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-
-  <style>
-    #map {
-      height: 100vh;
-      width: 100%;
-    }
-  </style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+  body, html {
+    margin: 0; padding: 0; height: 100%;
+    font-family: Arial, sans-serif;
+  }
+  #map { height: 85vh; width: 100%; }
+  #controls {
+    padding: 10px;
+    background: #f7f7f7;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  }
+  label {
+    margin-right: 8px;
+    font-weight: bold;
+  }
+  select {
+    padding: 5px;
+    margin-right: 20px;
+    min-width: 180px;
+  }
+</style>
 </head>
 <body>
-  <div id="map"></div>
 
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<div id="controls">
+  <label for="zoneSelect">Select Zone:</label>
+  <select id="zoneSelect">
+    <option value="">-- All Zones --</option>
+  </select>
 
-  <!-- Load GeoJSON and render zones -->
-  <script>
-    // Initialize the map centered on Karachi
-    var map = L.map('map').setView([24.8607, 67.0011], 11);
+  <label for="inspectorSelect">Select Inspector:</label>
+  <select id="inspectorSelect">
+    <option value="">-- All Inspectors --</option>
+  </select>
+</div>
 
-    // Add OpenStreetMap tiles
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors'
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+  // Define Karachi boundary box to restrict map view
+  const karachiBounds = [
+    [24.75, 66.85],  // SW corner (lat, lng)
+    [25.1, 67.2]     // NE corner (lat, lng)
+  ];
+
+  // Initialize map centered on Karachi with bounds restricted to Karachi
+  const map = L.map('map', {
+    center: [24.8607, 67.0011],
+    zoom: 12,
+    minZoom: 11,
+    maxZoom: 16,
+    maxBounds: karachiBounds,
+    maxBoundsViscosity: 1.0
+  });
+
+  // Add OpenStreetMap tile layer
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  let geoLayer;       // Layer for GeoJSON polygons
+  let zonesData;      // Store GeoJSON for filtering
+
+  const zoneSelect = document.getElementById('zoneSelect');
+  const inspectorSelect = document.getElementById('inspectorSelect');
+
+  // Load GeoJSON zones file
+  fetch('karachi_zones.geojson')
+    .then(res => res.json())
+    .then(data => {
+      zonesData = data;
+
+      // Populate dropdowns
+      populateDropdowns(data.features);
+
+      // Add polygons to map
+      addGeoJSONLayer(data);
+
+      // Listen for dropdown changes
+      zoneSelect.addEventListener('change', onFilterChange);
+      inspectorSelect.addEventListener('change', onFilterChange);
+    })
+    .catch(err => {
+      alert('Error loading GeoJSON data.');
+      console.error(err);
+    });
+
+  function populateDropdowns(features) {
+    const zonesSet = new Set();
+    const inspectorsSet = new Set();
+
+    features.forEach(f => {
+      zonesSet.add(f.properties.name);
+      inspectorsSet.add(f.properties.inspector);
+    });
+
+    zonesSet.forEach(zone => {
+      const opt = document.createElement('option');
+      opt.value = zone;
+      opt.textContent = zone;
+      zoneSelect.appendChild(opt);
+    });
+
+    inspectorsSet.forEach(inspector => {
+      const opt = document.createElement('option');
+      opt.value = inspector;
+      opt.textContent = inspector;
+      inspectorSelect.appendChild(opt);
+    });
+  }
+
+  function addGeoJSONLayer(geojson) {
+    if (geoLayer) map.removeLayer(geoLayer);
+
+    geoLayer = L.geoJSON(geojson, {
+      style: feature => ({
+        color: 'blue',
+        weight: 2,
+        fillOpacity: 0.3
+      }),
+      onEachFeature: (feature, layer) => {
+        const name = feature.properties.name || 'Unnamed Zone';
+        const inspector = feature.properties.inspector || 'No inspector assigned';
+        layer.bindPopup(`<b>${name}</b><br>Inspector: ${inspector}`);
+      }
     }).addTo(map);
 
-    // Load the GeoJSON file with error handling
-    fetch('karachi_zones.geojson')
-      .then(response => {
-        if (!response.ok) throw new Error("GeoJSON file could not be loaded.");
-        return response.json();
-      })
-      .then(data => {
-        L.geoJSON(data, {
-          onEachFeature: function (feature, layer) {
-            const name = feature.properties.name || "Unnamed Zone";
-            const inspector = feature.properties.inspector || "No inspector assigned";
-            layer.bindPopup(`<strong>${name}</strong><br>Inspector: ${inspector}`);
-          },
-          style: {
-            color: "blue",
-            weight: 2,
-            fillOpacity: 0.3
-          }
-        }).addTo(map);
-      })
-      .catch(error => {
-        console.error(error);
-        alert("Error loading zones: " + error.message);
-      });
-  </script>
+    // Fit map bounds to the polygons but restrict to Karachi bounds
+    const bounds = geoLayer.getBounds();
+    map.fitBounds(bounds.isValid() ? bounds : karachiBounds);
+  }
+
+  function onFilterChange() {
+    const selectedZone = zoneSelect.value;
+    const selectedInspector = inspectorSelect.value;
+
+    let filteredFeatures = zonesData.features.filter(f => {
+      const matchZone = selectedZone ? f.properties.name === selectedZone : true;
+      const matchInspector = selectedInspector ? f.properties.inspector === selectedInspector : true;
+      return matchZone && matchInspector;
+    });
+
+    const filteredGeoJSON = {
+      type: "FeatureCollection",
+      features: filteredFeatures
+    };
+
+    addGeoJSONLayer(filteredGeoJSON);
+
+    if (filteredFeatures.length === 1) {
+      const layer = geoLayer.getLayers()[0];
+      map.fitBounds(layer.getBounds());
+      layer.openPopup();
+    }
+  }
+</script>
+
 </body>
 </html>
