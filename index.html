@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Karachi Labor Inspectors Map</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<style>
+  body, html {
+    margin: 0; padding: 0; height: 100%;
+    font-family: Arial, sans-serif;
+  }
+  #map { height: 85vh; width: 100%; }
+  #controls {
+    padding: 10px;
+    background: #f7f7f7;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+  }
+  label {
+    margin-right: 8px;
+    font-weight: bold;
+  }
+  select {
+    padding: 5px;
+    margin-right: 20px;
+    min-width: 180px;
+  }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <label for="zoneSelect">Select Zone:</label>
+  <select id="zoneSelect">
+    <option value="">-- All Zones --</option>
+  </select>
+
+  <label for="inspectorSelect">Select Inspector:</label>
+  <select id="inspectorSelect">
+    <option value="">-- All Inspectors --</option>
+  </select>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+  // Karachi bounding box to restrict map panning and zoom
+  const karachiBounds = [
+    [24.75, 66.85],  // SW corner (lat, lng)
+    [25.1, 67.2]     // NE corner (lat, lng)
+  ];
+
+  // Karachi polygon coordinates (from your data, note: GeoJSON order lng,lat, Leaflet expects lat,lng)
+  const karachiPolygon = [
+    [24.831576054757278, 66.6562083423938],
+    [24.820827868788783, 66.88469633432979],
+    [24.76538203590688, 66.99711023474762],
+    [24.7066949935937, 67.05198946172226],
+    [24.67854755403947, 67.14404493922888],
+    [24.700261853704234, 67.16174791567329],
+    [24.79511896490328, 67.19803805173362],
+    [24.770204396341867, 67.31133806662135],
+    [24.780657978057192, 67.41488579230682],
+    [24.74850229995195, 67.47951634283547],
+    [24.875890234274536, 67.61365909994623],
+    [24.950545341969345, 67.63206281816477],
+    [25.026685342990703, 67.63149020067368],
+    [25.120340396764746, 67.61218018987609],
+    [25.194712599946058, 67.5750289221881],
+    [25.24979360650073, 67.53161357224599],
+    [25.25370368181987, 67.4361163564866],
+    [25.25850542153067, 67.3001333844303],
+    [25.258248970172502, 67.10617339119938],
+    [25.225440951530814, 67.07696519136093],
+    [25.205438461263213, 67.04332653490195],
+    [25.176594664457085, 67.03713750057233],
+    [25.13976036551294, 67.02827419410292],
+    [25.10371701109935, 67.01143145167921],
+    [25.072452314505753, 66.98928962233697],
+    [25.025935196817287, 66.93880190498135],
+    [25.009887091456037, 66.87240588216432],
+    [24.97056000408419, 66.81391433144674],
+    [24.97136176443709, 66.79795890880462],
+    [24.91916489192252, 66.7244350075826],
+    [24.889443621138653, 66.72000708132498],
+    [24.886218888353994, 66.6863052141824],
+    [24.85247847567257, 66.65622651677012],
+    [24.831576054757278, 66.6562083423938]
+  ];
+
+  // Initialize map centered on Karachi with bounds restricted to Karachi
+  const map = L.map('map', {
+    center: [24.8607, 67.0011],
+    zoom: 12,
+    minZoom: 11,
+    maxZoom: 16,
+    maxBounds: karachiBounds,
+    maxBoundsViscosity: 1.0
+  });
+
+  // Add OpenStreetMap tile layer
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  // Create a large rectangle polygon that covers the whole world
+  const outerBounds = [
+    [-90, -180],
+    [90, -180],
+    [90, 180],
+    [-90, 180]
+  ];
+
+  // Add the mask polygon: big rectangle with Karachi polygon as a hole
+  const mask = L.polygon([outerBounds, karachiPolygon], {
+    color: 'white',
+    fillColor: 'white',
+    fillOpacity: 0.9,
+    stroke: false,
+    interactive: false
+  }).addTo(map);
+
+  // Variables to hold zones data & layer
+  let zonesData;
+  let geoLayer;
+
+  // Dropdown elements
+  const zoneSelect = document.getElementById('zoneSelect');
+  const inspectorSelect = document.getElementById('inspectorSelect');
+
+  // Load your karachi_zones.geojson file
+  fetch('karachi_zones.geojson')
+    .then(res => res.json())
+    .then(data => {
+      zonesData = data;
+
+      // Populate dropdowns
+      populateDropdowns(data.features);
+
+      // Add GeoJSON polygons to map
+      addGeoJSONLayer(data);
+
+      // Dropdown change listeners
+      zoneSelect.addEventListener('change', onFilterChange);
+      inspectorSelect.addEventListener('change', onFilterChange);
+    })
+    .catch(err => {
+      alert('Failed to load GeoJSON data.');
+      console.error(err);
+    });
+
+  // Populate dropdowns with unique zones and inspectors
+  function populateDropdowns(features) {
+    const zonesSet = new Set();
+    const inspectorsSet = new Set();
+
+    features.forEach(f => {
+      zonesSet.add(f.properties.name);
+      inspectorsSet.add(f.properties.inspector);
+    });
+
+    zonesSet.forEach(zone => {
+      const option = document.createElement('option');
+      option.value = zone;
+      option.textContent = zone;
+      zoneSelect.appendChild(option);
+    });
+
+    inspectorsSet.forEach(inspector => {
+      const option = document.createElement('option');
+      option.value = inspector;
+      option.textContent = inspector;
+      inspectorSelect.appendChild(option);
+    });
+  }
+
+  // Add GeoJSON polygons to the map
+  function addGeoJSONLayer(geojson) {
+    if (geoLayer) map.removeLayer(geoLayer);
+
+    geoLayer = L.geoJSON(geojson, {
+      style: {
+        color: 'blue',
+        weight: 2,
+        fillOpacity: 0.3
+      },
+      onEachFeature: function(feature, layer) {
+        const name = feature.properties.name || 'Unnamed Zone';
+        const inspector = feature.properties.inspector || 'No inspector assigned';
+        layer.bindPopup(`<b>${name}</b><br>Inspector: ${inspector}`);
+      }
+    }).addTo(map);
+
+    // Adjust map view to polygons or Karachi bounds if none
+    const bounds = geoLayer.getBounds();
+    if (bounds.isValid()) {
+      map.fitBounds(bounds);
+    } else {
+      map.fitBounds(karachiBounds);
+    }
+  }
+
+  // Filter zones by dropdowns
+  function onFilterChange() {
+    const selectedZone = zoneSelect.value;
+    const selectedInspector = inspectorSelect.value;
+
+    const filteredFeatures = zonesData.features.filter(f => {
+      const zoneMatch = selectedZone ? f.properties.name === selectedZone : true;
+      const inspectorMatch = selectedInspector ? f.properties.inspector === selectedInspector : true;
+      return zoneMatch && inspectorMatch;
+    });
+
+    addGeoJSONLayer({
+      type: "FeatureCollection",
+      features: filteredFeatures
+    });
+
+    // Zoom and popup if exactly one zone is filtered
+    if (filteredFeatures.length === 1) {
+      const layer = geoLayer.getLayers()[0];
+      layer.openPopup();
+      map.fitBounds(layer.getBounds());
+    }
+  }
+</script>
+
+</body>
+</html>
